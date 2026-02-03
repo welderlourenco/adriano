@@ -17,8 +17,79 @@ const CONFIG = {
     ENEMY_BASE_HP: 50,
     ENEMY_BASE_ATK: 8,
     ENEMY_BASE_DEF: 2,
-    HEAL_PERCENT_ON_VICTORY: 0.3
+    BOSS_EVERY_WAVES: 5  // A cada 5 ondas é um boss
 };
+
+// Sistema de Poções
+const POTIONS = {
+    common: { 
+        name: 'Poção Comum', 
+        icon: '🧪', 
+        healPercent: 0.30, 
+        price: 50,
+        color: '#9ca3af',
+        desc: 'Recupera 30% da vida máxima'
+    },
+    uncommon: { 
+        name: 'Poção Incomum', 
+        icon: '🧴', 
+        healPercent: 0.50, 
+        price: 120,
+        color: '#22c55e',
+        desc: 'Recupera 50% da vida máxima'
+    },
+    rare: { 
+        name: 'Poção Rara', 
+        icon: '⚗️', 
+        healPercent: 0.70, 
+        price: 250,
+        color: '#3b82f6',
+        desc: 'Recupera 70% da vida máxima'
+    }
+};
+
+// ==========================================
+// GERADOR DE NÚMEROS ALEATÓRIOS COM SEED
+// ==========================================
+
+class SeededRandom {
+    constructor(seed = 12345) {
+        this.seed = seed;
+        this.currentSeed = seed;
+    }
+    
+    // Função hash para converter string em número
+    static hashString(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return Math.abs(hash);
+    }
+    
+    // Gera próximo número pseudo-aleatório (0-1)
+    next() {
+        this.currentSeed = (this.currentSeed * 1103515245 + 12345) & 0x7fffffff;
+        return this.currentSeed / 0x7fffffff;
+    }
+    
+    // Retorna inteiro entre min e max (inclusive)
+    nextInt(min, max) {
+        return Math.floor(this.next() * (max - min + 1)) + min;
+    }
+    
+    // Seleciona item aleatório de um array
+    pick(array) {
+        return array[this.nextInt(0, array.length - 1)];
+    }
+    
+    // Reseta para seed específica
+    setSeed(seed) {
+        this.currentSeed = seed;
+    }
+}
 
 // Sistema de Raridades
 const RARITIES = {
@@ -439,6 +510,9 @@ const gameState = {
     wave: 1,
     gold: 0,
     
+    // Gerador de random com seed para craft consistente
+    craftRng: new SeededRandom(42),
+    
     // Player
     player: {
         x: 150,
@@ -473,13 +547,19 @@ const gameState = {
         isAttacking: false,
         name: 'Slime',
         color: '#90EE90',
-        tier: 0
+        tier: 0,
+        isBoss: false
     },
     
     // Inventário
     inventory: {
         materials: {},  // { materialId_rarity: { id, rarity, count } }
-        equipment: []   // Array de equipamentos criados
+        equipment: [],  // Array de equipamentos criados
+        potions: {      // Poções do jogador
+            common: 0,
+            uncommon: 0,
+            rare: 0
+        }
     },
     
     // Equipamento do player
@@ -493,8 +573,8 @@ const gameState = {
         accessory: null
     },
     
-    // Craft
-    craftSlots: [null, null, null],
+    // Craft - agora com quantidade por slot
+    craftSlots: [null, null, null], // { id, rarity, quantity }
     craftPreview: null,
     
     // Input
@@ -565,6 +645,11 @@ function setupEventListeners() {
         if (e.code === 'KeyC') toggleCraft();
         if (e.code === 'KeyE') toggleEquipment();
         if (e.code === 'Escape') closeAllModals();
+        
+        // Poções (teclas 1, 2, 3)
+        if (e.code === 'Digit1') usePotion('common');
+        if (e.code === 'Digit2') usePotion('uncommon');
+        if (e.code === 'Digit3') usePotion('rare');
     });
     
     document.addEventListener('keyup', (e) => {
@@ -586,6 +671,9 @@ function setupEventListeners() {
     document.getElementById('next-wave-btn')?.addEventListener('click', nextWave);
     document.getElementById('restart-btn')?.addEventListener('click', restartGame);
     document.getElementById('craft-btn')?.addEventListener('click', performCraft);
+    
+    // Botões do vendedor
+    document.getElementById('leave-shop-btn')?.addEventListener('click', leaveShop);
 }
 
 function setupUI() {
@@ -621,26 +709,6 @@ function createTooltip() {
 // ==========================================
 // GAME LOOP
 // ==========================================
-
-function startGame() {
-    document.getElementById('title-screen').classList.add('hidden');
-    document.getElementById('game-screen').classList.remove('hidden');
-    
-    // Dá alguns materiais iniciais
-    addMaterial('wood', 'common', 5);
-    addMaterial('stone', 'common', 5);
-    addMaterial('iron', 'common', 3);
-    addMaterial('leather', 'common', 3);
-    addMaterial('bone', 'common', 2);
-    
-    resizeCanvas();
-    initEnemy();
-    
-    gameState.running = true;
-    gameState.paused = false;
-    
-    requestAnimationFrame(gameLoop);
-}
 
 function gameLoop(timestamp) {
     if (!gameState.running) {
@@ -961,20 +1029,31 @@ function initEnemy() {
     const tier = Math.min(Math.floor((wave - 1) / 5), ENEMY_TIERS.length - 1);
     const tierData = ENEMY_TIERS[tier];
     
+    // Verifica se é um Boss (a cada 5 ondas)
+    const isBoss = wave % CONFIG.BOSS_EVERY_WAVES === 0;
+    
     // Seleciona nome e cor aleatórios do tier
-    const name = tierData.names[Math.floor(Math.random() * tierData.names.length)];
+    let name = tierData.names[Math.floor(Math.random() * tierData.names.length)];
     const color = tierData.colors[Math.floor(Math.random() * tierData.colors.length)];
     
-    // Escala de dificuldade
-    const scaleFactor = 1 + (wave * 0.15) + Math.pow(wave, 1.2) * 0.03;
+    // Se for boss, adiciona prefixo
+    if (isBoss) {
+        name = `👑 ${name} Boss`;
+    }
+    
+    // Escala de dificuldade - bosses são mais fortes
+    let scaleFactor = 1 + (wave * 0.15) + Math.pow(wave, 1.2) * 0.03;
+    if (isBoss) {
+        scaleFactor *= 1.5; // Boss é 50% mais forte
+    }
     
     gameState.enemy = {
         x: gameState.arenaWidth - 150 - 60,
         y: gameState.arenaHeight - 120 - 90,
-        width: 60,
-        height: 90,
-        maxHp: Math.floor(CONFIG.ENEMY_BASE_HP * scaleFactor),
-        hp: Math.floor(CONFIG.ENEMY_BASE_HP * scaleFactor),
+        width: isBoss ? 75 : 60,  // Boss é maior
+        height: isBoss ? 110 : 90,
+        maxHp: Math.floor(CONFIG.ENEMY_BASE_HP * scaleFactor * (isBoss ? 2 : 1)), // Boss tem 2x HP
+        hp: Math.floor(CONFIG.ENEMY_BASE_HP * scaleFactor * (isBoss ? 2 : 1)),
         attack: Math.floor(CONFIG.ENEMY_BASE_ATK * scaleFactor * 0.8),
         defense: Math.floor(CONFIG.ENEMY_BASE_DEF * scaleFactor * 0.5),
         attackInterval: Math.max(600, 2000 - wave * 25),
@@ -982,8 +1061,15 @@ function initEnemy() {
         isAttacking: false,
         name: name,
         color: color,
-        tier: tier
+        tier: tier,
+        isBoss: isBoss
     };
+    
+    // Ajusta posição Y para bosses maiores
+    if (isBoss) {
+        const groundY = gameState.arenaHeight - 120;
+        gameState.enemy.y = groundY - gameState.enemy.height;
+    }
     
     updateHUD();
 }
@@ -998,8 +1084,11 @@ function enemyDefeated() {
     const goldReward = 10 + gameState.wave * 5 + Math.floor(Math.random() * gameState.wave * 3);
     gameState.gold += goldReward;
     
+    // Verifica se era um boss (a cada 5 ondas)
+    const wasBoss = gameState.wave % CONFIG.BOSS_EVERY_WAVES === 0;
+    
     // Mostra modal de vitória
-    showVictoryModal(loot, goldReward);
+    showVictoryModal(loot, goldReward, wasBoss);
 }
 
 function playerDefeated() {
@@ -1014,9 +1103,7 @@ function nextWave() {
     
     gameState.wave++;
     
-    // Cura parcial
-    const healAmount = Math.floor(gameState.player.maxHp * CONFIG.HEAL_PERCENT_ON_VICTORY);
-    gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + healAmount);
+    // SEM CURA ao passar de onda - o player precisa usar poções!
     
     // Reset posições
     gameState.player.x = 150;
@@ -1036,7 +1123,11 @@ function restartGame() {
     gameState.player.x = 150;
     
     // Limpa inventário e equipamento
-    gameState.inventory = { materials: {}, equipment: [] };
+    gameState.inventory = { 
+        materials: {}, 
+        equipment: [],
+        potions: { common: 0, uncommon: 0, rare: 0 }
+    };
     gameState.equipment = {
         weapon: null, helmet: null, armor: null,
         pants: null, boots: null, gloves: null, accessory: null
@@ -1050,8 +1141,12 @@ function restartGame() {
     addMaterial('leather', 'common', 3);
     addMaterial('bone', 'common', 2);
     
+    // Uma poção comum inicial
+    gameState.inventory.potions.common = 1;
+    
     recalculatePlayerStats();
     initEnemy();
+    updatePotionHUD();
     
     gameState.running = true;
     gameState.paused = false;
@@ -1114,9 +1209,10 @@ function rollRarity(wave, maxRarity) {
     return 'common';
 }
 
-function showVictoryModal(loot, gold) {
+function showVictoryModal(loot, gold, wasBoss = false) {
     const modal = document.getElementById('victory-modal');
     const lootDisplay = document.getElementById('loot-display');
+    const nextWaveBtn = document.getElementById('next-wave-btn');
     
     lootDisplay.innerHTML = `
         <div class="loot-item">
@@ -1139,6 +1235,18 @@ function showVictoryModal(loot, gold) {
             <span class="loot-count">x${drop.quantity}</span>
         `;
         lootDisplay.appendChild(item);
+    }
+    
+    // Se foi um boss, mostra botão para ir ao vendedor
+    if (wasBoss) {
+        nextWaveBtn.textContent = '🏪 Visitar Vendedor';
+        nextWaveBtn.onclick = () => {
+            modal.classList.add('hidden');
+            showShopModal();
+        };
+    } else {
+        nextWaveBtn.textContent = 'Próximo Inimigo';
+        nextWaveBtn.onclick = nextWave;
     }
     
     modal.classList.remove('hidden');
@@ -1182,23 +1290,58 @@ function getMaterialCount(materialId, rarity) {
 }
 
 // ==========================================
-// SISTEMA DE CRAFT ALQUÍMICO
+// SISTEMA DE CRAFT ALQUÍMICO (PROCEDURAL COM SEED)
 // ==========================================
+
+// Gera uma seed única baseada na combinação de materiais
+function generateCraftSeed(slots) {
+    // Ordena os slots para garantir que a ordem não afete o resultado
+    const sortedSlots = slots
+        .filter(s => s !== null)
+        .map(s => `${s.id}_${s.rarity}_${s.quantity}`)
+        .sort()
+        .join('|');
+    
+    return SeededRandom.hashString(sortedSlots);
+}
 
 function addToCraftSlot(materialId, rarity) {
     // Verifica se tem o material
-    if (getMaterialCount(materialId, rarity) < 1) return;
+    const available = getMaterialCount(materialId, rarity);
+    if (available < 1) return;
+    
+    // Procura slot existente com mesmo material
+    const existingIndex = gameState.craftSlots.findIndex(
+        s => s !== null && s.id === materialId && s.rarity === rarity
+    );
+    
+    if (existingIndex !== -1) {
+        // Incrementa quantidade no slot existente (máximo baseado no disponível)
+        const maxAdd = available;
+        if (gameState.craftSlots[existingIndex].quantity < maxAdd) {
+            gameState.craftSlots[existingIndex].quantity++;
+            updateCraftUI();
+        }
+        return;
+    }
     
     // Encontra slot vazio
     const emptyIndex = gameState.craftSlots.findIndex(s => s === null);
     if (emptyIndex === -1) return;
     
-    gameState.craftSlots[emptyIndex] = { id: materialId, rarity: rarity };
+    gameState.craftSlots[emptyIndex] = { id: materialId, rarity: rarity, quantity: 1 };
     updateCraftUI();
 }
 
 function removeCraftSlot(index) {
-    gameState.craftSlots[index] = null;
+    if (gameState.craftSlots[index]) {
+        // Reduz quantidade ou remove completamente
+        if (gameState.craftSlots[index].quantity > 1) {
+            gameState.craftSlots[index].quantity--;
+        } else {
+            gameState.craftSlots[index] = null;
+        }
+    }
     updateCraftUI();
 }
 
@@ -1209,10 +1352,13 @@ function updateCraftUI() {
         
         if (item) {
             const material = MATERIALS[item.id];
-            slot.textContent = material.icon;
+            slot.innerHTML = `
+                <span class="craft-icon">${material.icon}</span>
+                <span class="craft-quantity">x${item.quantity}</span>
+            `;
             slot.classList.add('filled', `rarity-${item.rarity}`);
         } else {
-            slot.textContent = '';
+            slot.innerHTML = '';
             slot.classList.remove('filled');
             Object.keys(RARITIES).forEach(r => slot.classList.remove(`rarity-${r}`));
         }
@@ -1233,22 +1379,30 @@ function updateCraftUI() {
             <span style="color: #4ade80">ATK: +${preview.attack}</span> | 
             <span style="color: #60a5fa">DEF: +${preview.defense}</span>
             ${preview.element ? `<br><span style="color: #ffd700">Elemento: ${preview.element}</span>` : ''}
+            <br><span style="color: #888; font-size: 11px;">Materiais: ${preview.totalItems} itens</span>
         `;
         gameState.craftPreview = preview;
     } else {
         resultSlot.textContent = '?';
         resultSlot.className = 'craft-slot result';
         craftBtn.disabled = true;
-        previewDiv.textContent = 'Adicione 2-3 materiais para criar um item';
+        previewDiv.innerHTML = 'Adicione 2+ materiais para criar um item<br><span style="color: #888; font-size: 11px;">Use múltiplas vezes para aumentar quantidade por slot</span>';
         gameState.craftPreview = null;
     }
 }
 
 function calculateCraftResult() {
     const slots = gameState.craftSlots.filter(s => s !== null);
-    if (slots.length < 2) return null;
     
-    // Coleta dados dos materiais
+    // Precisa de pelo menos 2 materiais TOTAIS
+    const totalItems = slots.reduce((sum, s) => sum + s.quantity, 0);
+    if (totalItems < 2) return null;
+    
+    // Gera seed baseada na combinação (GARANTE CONSISTÊNCIA)
+    const craftSeed = generateCraftSeed(slots);
+    gameState.craftRng.setSeed(craftSeed);
+    
+    // Coleta dados dos materiais considerando quantidade
     let totalValue = 0;
     let totalAttack = 0;
     let totalDefense = 0;
@@ -1259,25 +1413,33 @@ function calculateCraftResult() {
     for (const slot of slots) {
         const material = MATERIALS[slot.id];
         const rarityData = RARITIES[slot.rarity];
+        const qty = slot.quantity;
         
-        totalValue += material.value * rarityData.multiplier;
-        totalAttack += material.attack * rarityData.multiplier;
-        totalDefense += material.defense * rarityData.multiplier;
+        // Multiplica pelos quantidade - mais itens = mais poder!
+        const qtyMultiplier = 1 + (qty - 1) * 0.5; // Cada item extra adiciona 50%
         
-        categories[material.category] = (categories[material.category] || 0) + 1;
+        totalValue += material.value * rarityData.multiplier * qtyMultiplier;
+        totalAttack += material.attack * rarityData.multiplier * qtyMultiplier;
+        totalDefense += material.defense * rarityData.multiplier * qtyMultiplier;
+        
+        categories[material.category] = (categories[material.category] || 0) + qty;
         
         if (material.element) {
-            elements.push(material.element);
+            for (let i = 0; i < qty; i++) {
+                elements.push(material.element);
+            }
         }
         
-        rarities.push(slot.rarity);
+        for (let i = 0; i < qty; i++) {
+            rarities.push(slot.rarity);
+        }
     }
     
     // Determina categoria dominante
     const dominantCategory = Object.entries(categories)
         .sort((a, b) => b[1] - a[1])[0][0];
     
-    // Determina tipo de equipamento baseado nos stats e categorias
+    // Determina tipo de equipamento baseado nos stats e categorias (USANDO SEED)
     const equipType = determineEquipmentType(dominantCategory, totalAttack, totalDefense, categories);
     
     // Determina raridade do resultado
@@ -1285,21 +1447,24 @@ function calculateCraftResult() {
     const avgRarityIndex = rarities.reduce((sum, r) => sum + rarityOrder.indexOf(r), 0) / rarities.length;
     let resultRarityIndex = Math.floor(avgRarityIndex);
     
-    // Bônus de raridade se valor total for alto
-    if (totalValue > 150) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
-    if (totalValue > 250) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
+    // Bônus de raridade baseado no valor total e quantidade de itens
+    if (totalValue > 100) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
+    if (totalValue > 200) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
+    if (totalItems >= 5) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
+    if (totalItems >= 8) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
     
     const resultRarity = rarityOrder[resultRarityIndex];
     
-    // Gera nome do item
+    // Gera nome do item (USANDO SEED PARA CONSISTÊNCIA)
     const name = generateItemName(equipType, dominantCategory, resultRarity, elements[0]);
     
-    // Calcula stats finais
+    // Calcula stats finais - quantidade de itens aumenta stats
     const isWeapon = equipType === 'weapon';
-    const finalAttack = Math.floor(totalAttack * (isWeapon ? 1.5 : 0.3));
-    const finalDefense = Math.floor(totalDefense * (isWeapon ? 0.3 : 1.5));
+    const itemBonus = 1 + (totalItems - 2) * 0.15; // +15% por item extra além dos 2 iniciais
+    const finalAttack = Math.floor(totalAttack * (isWeapon ? 1.5 : 0.3) * itemBonus);
+    const finalDefense = Math.floor(totalDefense * (isWeapon ? 0.3 : 1.5) * itemBonus);
     
-    // Seleciona ícone
+    // Seleciona ícone (USANDO SEED PARA CONSISTÊNCIA)
     const icon = selectEquipmentIcon(equipType, dominantCategory, elements[0]);
     
     return {
@@ -1311,11 +1476,15 @@ function calculateCraftResult() {
         element: elements[0] || null,
         icon: icon,
         category: dominantCategory,
-        value: Math.floor(totalValue)
+        value: Math.floor(totalValue),
+        totalItems: totalItems
     };
 }
 
 function determineEquipmentType(dominantCategory, attack, defense, categories) {
+    // Usa o RNG com seed para consistência
+    const rng = gameState.craftRng;
+    
     // Lógica baseada em proporção de ataque/defesa e categorias
     
     // Gemas sozinhas = acessório
@@ -1336,19 +1505,19 @@ function determineEquipmentType(dominantCategory, attack, defense, categories) {
     // Defesa muito maior = armadura/escudo
     if (defense > attack * 1.5) {
         const armorTypes = ['helmet', 'armor', 'pants', 'boots', 'gloves'];
-        return armorTypes[Math.floor(Math.random() * armorTypes.length)];
+        return rng.pick(armorTypes);
     }
     
     // Couro/tecido = armadura leve
     if (dominantCategory === 'fabric') {
         const lightArmor = ['armor', 'pants', 'boots', 'gloves'];
-        return lightArmor[Math.floor(Math.random() * lightArmor.length)];
+        return rng.pick(lightArmor);
     }
     
     // Metal com mais defesa = armadura pesada
     if (dominantCategory === 'metal' && defense >= attack) {
         const heavyArmor = ['helmet', 'armor', 'pants', 'boots', 'gloves'];
-        return heavyArmor[Math.floor(Math.random() * heavyArmor.length)];
+        return rng.pick(heavyArmor);
     }
     
     // Default: arma se ataque >= defesa, senão armadura aleatória
@@ -1357,35 +1526,38 @@ function determineEquipmentType(dominantCategory, attack, defense, categories) {
     }
     
     const allArmor = ['helmet', 'armor', 'pants', 'boots', 'gloves'];
-    return allArmor[Math.floor(Math.random() * allArmor.length)];
+    return rng.pick(allArmor);
 }
 
 function generateItemName(type, category, rarity, element) {
+    const rng = gameState.craftRng;
+    
     // Base name
     const typeNames = EQUIPMENT_NAMES[type];
     const categoryNames = typeNames[category] || typeNames[Object.keys(typeNames)[0]];
-    const baseName = categoryNames[Math.floor(Math.random() * categoryNames.length)];
+    const baseName = rng.pick(categoryNames);
     
     // Prefix
     const prefixes = RARITY_PREFIXES[rarity];
-    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const prefix = rng.pick(prefixes);
     
     // Suffix
     let suffix = '';
     if (element && ELEMENT_SUFFIXES[element]) {
         const suffixes = ELEMENT_SUFFIXES[element];
-        suffix = ' ' + suffixes[Math.floor(Math.random() * suffixes.length)];
+        suffix = ' ' + rng.pick(suffixes);
     }
     
     return `${prefix ? prefix + ' ' : ''}${baseName}${suffix}`.trim();
 }
 
 function selectEquipmentIcon(type, category, element) {
+    const rng = gameState.craftRng;
     const typeIcons = EQUIPMENT_ICONS[type];
     const categoryIcons = typeIcons?.[category] || typeIcons?.default || ['❓'];
     
-    // Chance de usar ícone elemental
-    if (element && Math.random() > 0.5) {
+    // Chance de usar ícone elemental (50% usando seed)
+    if (element && rng.next() > 0.5) {
         const elementIcons = {
             fire: '🔥', ice: '❄️', lightning: '⚡', nature: '🌿',
             dark: '🌑', light: '✨', holy: '✝️', magic: '🔮',
@@ -1394,16 +1566,16 @@ function selectEquipmentIcon(type, category, element) {
         if (elementIcons[element]) return elementIcons[element];
     }
     
-    return categoryIcons[Math.floor(Math.random() * categoryIcons.length)];
+    return rng.pick(categoryIcons);
 }
 
 function performCraft() {
     if (!gameState.craftPreview) return;
     
-    // Remove materiais do inventário
+    // Remove materiais do inventário (considerando quantidade)
     for (const slot of gameState.craftSlots) {
         if (slot) {
-            removeMaterial(slot.id, slot.rarity, 1);
+            removeMaterial(slot.id, slot.rarity, slot.quantity);
         }
     }
     
@@ -1705,7 +1877,245 @@ function hideTooltip() {
 }
 
 // ==========================================
+// SISTEMA DE POÇÕES
+// ==========================================
+
+function usePotion(type) {
+    if (gameState.inventory.potions[type] <= 0) return;
+    if (gameState.player.hp >= gameState.player.maxHp) return; // Já está com vida cheia
+    
+    const potion = POTIONS[type];
+    const healAmount = Math.floor(gameState.player.maxHp * potion.healPercent);
+    
+    gameState.inventory.potions[type]--;
+    gameState.player.hp = Math.min(gameState.player.maxHp, gameState.player.hp + healAmount);
+    
+    showDamagePopup(
+        gameState.player.x + gameState.player.width/2, 
+        gameState.player.y, 
+        healAmount, 
+        true
+    );
+    
+    updateHUD();
+    updatePotionHUD();
+}
+
+function updatePotionHUD() {
+    const potionHud = document.getElementById('potion-hud');
+    if (!potionHud) return;
+    
+    potionHud.innerHTML = '';
+    
+    for (const [type, potion] of Object.entries(POTIONS)) {
+        const count = gameState.inventory.potions[type];
+        const keyNum = type === 'common' ? 1 : type === 'uncommon' ? 2 : 3;
+        
+        const potionEl = document.createElement('div');
+        potionEl.className = `potion-slot ${count > 0 ? 'available' : 'empty'}`;
+        potionEl.style.borderColor = potion.color;
+        potionEl.innerHTML = `
+            <span class="potion-icon">${potion.icon}</span>
+            <span class="potion-count">x${count}</span>
+            <span class="potion-key">[${keyNum}]</span>
+        `;
+        potionEl.onclick = () => usePotion(type);
+        potionEl.title = `${potion.name} - ${potion.desc}`;
+        
+        potionHud.appendChild(potionEl);
+    }
+}
+
+// ==========================================
+// SISTEMA DO VENDEDOR
+// ==========================================
+
+function showShopModal() {
+    const modal = document.getElementById('shop-modal');
+    if (!modal) {
+        createShopModal();
+    }
+    
+    updateShopUI();
+    document.getElementById('shop-modal').classList.remove('hidden');
+    gameState.paused = true;
+}
+
+function createShopModal() {
+    const modal = document.createElement('div');
+    modal.id = 'shop-modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content large">
+            <h2>🏪 Vendedor Ambulante</h2>
+            <div class="shop-gold">
+                <span>💰 Seu Ouro: <span id="shop-gold-display">${gameState.gold}</span></span>
+            </div>
+            
+            <h3>🧪 Poções (Sempre Disponíveis)</h3>
+            <div id="shop-potions" class="shop-grid"></div>
+            
+            <h3>📦 Materiais à Venda</h3>
+            <div id="shop-materials" class="shop-grid"></div>
+            
+            <button id="leave-shop-btn" class="btn">Continuar Jornada</button>
+        </div>
+    `;
+    
+    document.getElementById('game-container').appendChild(modal);
+    document.getElementById('leave-shop-btn').addEventListener('click', leaveShop);
+}
+
+function updateShopUI() {
+    document.getElementById('shop-gold-display').textContent = gameState.gold;
+    
+    // Poções (sempre disponíveis)
+    const potionsGrid = document.getElementById('shop-potions');
+    potionsGrid.innerHTML = '';
+    
+    for (const [type, potion] of Object.entries(POTIONS)) {
+        const item = document.createElement('div');
+        item.className = 'shop-item';
+        item.style.borderColor = potion.color;
+        item.innerHTML = `
+            <span class="shop-icon">${potion.icon}</span>
+            <span class="shop-name" style="color: ${potion.color}">${potion.name}</span>
+            <span class="shop-desc">${potion.desc}</span>
+            <span class="shop-price">💰 ${potion.price}</span>
+            <button class="shop-buy-btn" ${gameState.gold < potion.price ? 'disabled' : ''}>
+                Comprar
+            </button>
+        `;
+        
+        const buyBtn = item.querySelector('.shop-buy-btn');
+        buyBtn.onclick = () => buyPotion(type);
+        
+        potionsGrid.appendChild(item);
+    }
+    
+    // Materiais (baseados no tier atual)
+    const materialsGrid = document.getElementById('shop-materials');
+    materialsGrid.innerHTML = '';
+    
+    const shopMaterials = generateShopMaterials();
+    
+    for (const shopItem of shopMaterials) {
+        const material = MATERIALS[shopItem.id];
+        const rarity = RARITIES[shopItem.rarity];
+        
+        const item = document.createElement('div');
+        item.className = `shop-item rarity-${shopItem.rarity}`;
+        item.innerHTML = `
+            <span class="shop-icon">${material.icon}</span>
+            <span class="shop-name" style="color: ${rarity.color}">${rarity.name} ${material.name}</span>
+            <span class="shop-desc">ATK: +${material.attack} | DEF: +${material.defense}</span>
+            <span class="shop-price">💰 ${shopItem.price}</span>
+            <button class="shop-buy-btn" ${gameState.gold < shopItem.price ? 'disabled' : ''}>
+                Comprar
+            </button>
+        `;
+        
+        const buyBtn = item.querySelector('.shop-buy-btn');
+        buyBtn.onclick = () => buyMaterial(shopItem.id, shopItem.rarity, shopItem.price);
+        
+        materialsGrid.appendChild(item);
+    }
+}
+
+function generateShopMaterials() {
+    const tier = Math.min(Math.floor((gameState.wave - 1) / 5), ENEMY_TIERS.length - 1);
+    const tierData = ENEMY_TIERS[tier];
+    const materials = [];
+    
+    // Gera 4-6 materiais aleatórios do tier
+    const count = 4 + Math.floor(Math.random() * 3);
+    const usedMaterials = new Set();
+    
+    for (let i = 0; i < count; i++) {
+        const materialId = tierData.drops[Math.floor(Math.random() * tierData.drops.length)];
+        
+        // Evita duplicatas
+        if (usedMaterials.has(materialId)) continue;
+        usedMaterials.add(materialId);
+        
+        const material = MATERIALS[materialId];
+        const rarity = rollRarity(gameState.wave, tierData.maxRarity);
+        const rarityData = RARITIES[rarity];
+        
+        // Preço baseado no valor e raridade
+        const basePrice = material.value * rarityData.multiplier;
+        const price = Math.floor(basePrice * (1.5 + Math.random() * 0.5));
+        
+        materials.push({
+            id: materialId,
+            rarity: rarity,
+            price: price
+        });
+    }
+    
+    return materials;
+}
+
+function buyPotion(type) {
+    const potion = POTIONS[type];
+    
+    if (gameState.gold < potion.price) {
+        alert('Ouro insuficiente!');
+        return;
+    }
+    
+    gameState.gold -= potion.price;
+    gameState.inventory.potions[type]++;
+    
+    updateShopUI();
+    updatePotionHUD();
+    updateHUD();
+}
+
+function buyMaterial(materialId, rarity, price) {
+    if (gameState.gold < price) {
+        alert('Ouro insuficiente!');
+        return;
+    }
+    
+    gameState.gold -= price;
+    addMaterial(materialId, rarity, 1);
+    
+    updateShopUI();
+    updateHUD();
+}
+
+function leaveShop() {
+    document.getElementById('shop-modal').classList.add('hidden');
+    nextWave();
+}
+
+// ==========================================
 // INICIALIZAÇÃO
 // ==========================================
+
+function startGame() {
+    document.getElementById('title-screen').classList.add('hidden');
+    document.getElementById('game-screen').classList.remove('hidden');
+    
+    // Dá alguns materiais iniciais
+    addMaterial('wood', 'common', 5);
+    addMaterial('stone', 'common', 5);
+    addMaterial('iron', 'common', 3);
+    addMaterial('leather', 'common', 3);
+    addMaterial('bone', 'common', 2);
+    
+    // Dá uma poção comum inicial
+    gameState.inventory.potions.common = 1;
+    
+    resizeCanvas();
+    initEnemy();
+    updatePotionHUD();
+    
+    gameState.running = true;
+    gameState.paused = false;
+    
+    requestAnimationFrame(gameLoop);
+}
 
 document.addEventListener('DOMContentLoaded', init);
