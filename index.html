@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alquimia Combat - Roguelike Boss Rush</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Tela de título -->
+        <div id="title-screen" class="screen">
+            <h1>⚔️ Alquimia Combat ⚔️</h1>
+            <p>Roguelike Boss Rush</p>
+            <button id="start-btn" class="btn">Iniciar Jogo</button>
+            <div class="controls-info">
+                <h3>Controles:</h3>
+                <p>A/D ou ←/→ - Mover</p>
+                <p>Espaço ou J - Atacar</p>
+                <p>I - Inventário</p>
+                <p>C - Crafting</p>
+            </div>
+        </div>
+
+        <!-- Tela de jogo -->
+        <div id="game-screen" class="screen hidden">
+            <!-- HUD -->
+            <div id="hud">
+                <div id="player-hud" class="hud-panel">
+                    <div class="hud-name">Herói</div>
+                    <div class="health-bar">
+                        <div id="player-health-fill" class="health-fill"></div>
+                        <span id="player-health-text">100/100</span>
+                    </div>
+                    <div class="stats">
+                        <span>ATK: <span id="player-atk">10</span></span>
+                        <span>DEF: <span id="player-def">5</span></span>
+                    </div>
+                </div>
+                <div id="battle-info">
+                    <div id="wave-counter">Onda: 1</div>
+                    <div id="gold-counter">💰 0</div>
+                </div>
+                <div id="enemy-hud" class="hud-panel">
+                    <div class="hud-name" id="enemy-name">Slime</div>
+                    <div class="health-bar">
+                        <div id="enemy-health-fill" class="health-fill enemy"></div>
+                        <span id="enemy-health-text">50/50</span>
+                    </div>
+                    <div class="stats">
+                        <span>ATK: <span id="enemy-atk">5</span></span>
+                        <span>DEF: <span id="enemy-def">2</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Arena de batalha -->
+            <canvas id="game-canvas"></canvas>
+
+            <!-- Botões de ação mobile -->
+            <div id="mobile-controls">
+                <button id="btn-left" class="mobile-btn">←</button>
+                <button id="btn-attack" class="mobile-btn attack">⚔️</button>
+                <button id="btn-right" class="mobile-btn">→</button>
+            </div>
+
+            <!-- Menu inferior -->
+            <div id="bottom-menu">
+                <button id="btn-inventory" class="menu-btn">🎒 Inventário (I)</button>
+                <button id="btn-craft" class="menu-btn">🔨 Craft (C)</button>
+                <button id="btn-equipment" class="menu-btn">🛡️ Equipamento (E)</button>
+            </div>
+        </div>
+
+        <!-- Modal de Inventário -->
+        <div id="inventory-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>🎒 Inventário</h2>
+                <div id="inventory-grid" class="item-grid"></div>
+                <button class="btn close-btn" onclick="closeAllModals()">Fechar</button>
+            </div>
+        </div>
+
+        <!-- Modal de Crafting -->
+        <div id="craft-modal" class="modal hidden">
+            <div class="modal-content large">
+                <h2>🔨 Alquimia - Sistema de Craft</h2>
+                <div id="craft-area">
+                    <div id="craft-slots">
+                        <div class="craft-slot" data-slot="0"></div>
+                        <span>+</span>
+                        <div class="craft-slot" data-slot="1"></div>
+                        <span>+</span>
+                        <div class="craft-slot" data-slot="2"></div>
+                        <span>=</span>
+                        <div id="craft-result" class="craft-slot result"></div>
+                    </div>
+                    <button id="craft-btn" class="btn">Criar Item</button>
+                    <div id="craft-preview"></div>
+                </div>
+                <h3>Materiais Disponíveis:</h3>
+                <div id="materials-grid" class="item-grid"></div>
+                <h3>Receitas Descobertas:</h3>
+                <div id="recipes-list"></div>
+                <button class="btn close-btn" onclick="closeAllModals()">Fechar</button>
+            </div>
+        </div>
+
+        <!-- Modal de Equipamento -->
+        <div id="equipment-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>🛡️ Equipamento</h2>
+                <div id="equipment-slots">
+                    <div class="equip-row">
+                        <div class="equip-slot" data-slot="helmet">
+                            <span class="slot-label">Capacete</span>
+                            <div class="slot-content"></div>
+                        </div>
+                    </div>
+                    <div class="equip-row">
+                        <div class="equip-slot" data-slot="armor">
+                            <span class="slot-label">Armadura</span>
+                            <div class="slot-content"></div>
+                        </div>
+                        <div class="equip-slot" data-slot="weapon">
+                            <span class="slot-label">Arma</span>
+                            <div class="slot-content"></div>
+                        </div>
+                    </div>
+                    <div class="equip-row">
+                        <div class="equip-slot" data-slot="gloves">
+                            <span class="slot-label">Luvas</span>
+                            <div class="slot-content"></div>
+                        </div>
+                        <div class="equip-slot" data-slot="accessory">
+                            <span class="slot-label">Acessório</span>
+                            <div class="slot-content"></div>
+                        </div>
+                    </div>
+                    <div class="equip-row">
+                        <div class="equip-slot" data-slot="pants">
+                            <span class="slot-label">Calças</span>
+                            <div class="slot-content"></div>
+                        </div>
+                    </div>
+                    <div class="equip-row">
+                        <div class="equip-slot" data-slot="boots">
+                            <span class="slot-label">Botas</span>
+                            <div class="slot-content"></div>
+                        </div>
+                    </div>
+                </div>
+                <h3>Itens Equipáveis:</h3>
+                <div id="equipable-items" class="item-grid"></div>
+                <button class="btn close-btn" onclick="closeAllModals()">Fechar</button>
+            </div>
+        </div>
+
+        <!-- Modal de Vitória -->
+        <div id="victory-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>⚔️ Vitória! ⚔️</h2>
+                <div id="loot-display"></div>
+                <button id="next-wave-btn" class="btn">Próximo Inimigo</button>
+            </div>
+        </div>
+
+        <!-- Modal de Derrota -->
+        <div id="defeat-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>💀 Derrota 💀</h2>
+                <p>Você foi derrotado na onda <span id="defeat-wave">1</span></p>
+                <button id="restart-btn" class="btn">Tentar Novamente</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
