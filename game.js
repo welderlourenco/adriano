@@ -668,7 +668,7 @@ function setupEventListeners() {
     document.getElementById('btn-inventory')?.addEventListener('click', toggleInventory);
     document.getElementById('btn-craft')?.addEventListener('click', toggleCraft);
     document.getElementById('btn-equipment')?.addEventListener('click', toggleEquipment);
-    document.getElementById('next-wave-btn')?.addEventListener('click', nextWave);
+    // NOTA: next-wave-btn tem onclick definido dinamicamente em showVictoryModal
     document.getElementById('restart-btn')?.addEventListener('click', restartGame);
     document.getElementById('craft-btn')?.addEventListener('click', performCraft);
     
@@ -1700,6 +1700,9 @@ function closeAllModals() {
         }
     });
     
+    // Esconde tooltip ao fechar modais
+    hideTooltip();
+    
     if (gameState.running && !document.getElementById('victory-modal').classList.contains('hidden') === false) {
         gameState.paused = false;
     }
@@ -1873,8 +1876,15 @@ function showTooltip(e, data) {
 }
 
 function hideTooltip() {
-    document.getElementById('tooltip').classList.add('hidden');
+    const tooltip = document.getElementById('tooltip');
+    if (tooltip) {
+        tooltip.classList.add('hidden');
+    }
 }
+
+// Esconde tooltip quando clica em qualquer lugar ou muda de modal
+document.addEventListener('click', hideTooltip);
+document.addEventListener('scroll', hideTooltip);
 
 // ==========================================
 // SISTEMA DE POÇÕES
@@ -2087,7 +2097,17 @@ function buyMaterial(materialId, rarity, price) {
 
 function leaveShop() {
     document.getElementById('shop-modal').classList.add('hidden');
-    nextWave();
+    
+    // Incrementa wave e inicia próximo inimigo (não chama nextWave pois já incrementamos a wave aqui)
+    gameState.wave++;
+    
+    // Reset posições
+    gameState.player.x = 150;
+    
+    initEnemy();
+    hideTooltip(); // Esconde qualquer tooltip que ficou aberto
+    
+    gameState.paused = false;
 }
 
 // ==========================================
