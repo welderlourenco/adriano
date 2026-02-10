@@ -97,13 +97,14 @@
                         <span>=</span>
                         <div id="craft-result" class="craft-slot result"></div>
                     </div>
-                    <button id="craft-btn" class="btn">Criar Item</button>
+                    <div id="craft-buttons">
+                        <button id="craft-peek-btn" class="btn peek-btn" style="display: none;">👁️ Ver Resultado (20g)</button>
+                        <button id="craft-btn" class="btn">⚗️ Combinar!</button>
+                    </div>
                     <div id="craft-preview"></div>
                 </div>
                 <h3>Materiais Disponíveis:</h3>
                 <div id="materials-grid" class="item-grid"></div>
-                <h3>Receitas Descobertas:</h3>
-                <div id="recipes-list"></div>
                 <button class="btn close-btn" onclick="closeAllModals()">Fechar</button>
             </div>
         </div>

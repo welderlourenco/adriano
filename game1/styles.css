@@ -473,9 +473,37 @@ body {
     height: 80px;
 }
 
+.craft-slot.result.mystery {
+    border-color: #888;
+    background: rgba(100, 100, 100, 0.3);
+    animation: mysteryPulse 2s ease-in-out infinite;
+}
+
+.craft-slot.result.failed {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.2);
+    animation: failedPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mysteryPulse {
+    0%, 100% { box-shadow: 0 0 10px rgba(150, 150, 150, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(150, 150, 150, 0.6); }
+}
+
+@keyframes failedPulse {
+    0%, 100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+}
+
+#craft-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 15px;
+    flex-wrap: wrap;
+}
+
 #craft-btn {
-    display: block;
-    margin: 0 auto;
     padding: 12px 40px;
 }
 
@@ -484,6 +512,23 @@ body {
     color: #888;
     cursor: not-allowed;
     box-shadow: none;
+}
+
+.peek-btn {
+    background: linear-gradient(to bottom, #60a5fa 0%, #3b82f6 100%) !important;
+    color: #fff !important;
+    padding: 10px 20px !important;
+    font-size: 0.9rem !important;
+}
+
+.peek-btn:hover {
+    background: linear-gradient(to bottom, #93c5fd 0%, #60a5fa 100%) !important;
+}
+
+.peek-btn:disabled {
+    background: #444 !important;
+    color: #888 !important;
+    cursor: not-allowed;
 }
 
 #craft-preview {

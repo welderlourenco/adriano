@@ -576,6 +576,8 @@ const gameState = {
     // Craft - agora com quantidade por slot
     craftSlots: [null, null, null], // { id, rarity, quantity }
     craftPreview: null,
+    craftPreviewPaid: false, // Se o player pagou para ver o resultado
+    craftCurrentSeed: null,  // Seed atual da combinação
     
     // Input
     keys: {},
@@ -671,6 +673,7 @@ function setupEventListeners() {
     // NOTA: next-wave-btn tem onclick definido dinamicamente em showVictoryModal
     document.getElementById('restart-btn')?.addEventListener('click', restartGame);
     document.getElementById('craft-btn')?.addEventListener('click', performCraft);
+    document.getElementById('craft-peek-btn')?.addEventListener('click', peekCraftResult);
     
     // Botões do vendedor
     document.getElementById('leave-shop-btn')?.addEventListener('click', leaveShop);
@@ -1369,26 +1372,77 @@ function updateCraftUI() {
     const resultSlot = document.getElementById('craft-result');
     const craftBtn = document.getElementById('craft-btn');
     const previewDiv = document.getElementById('craft-preview');
+    const peekBtn = document.getElementById('craft-peek-btn');
+    
+    // Verifica se a seed mudou (combinação mudou)
+    const newSeed = preview ? generateCraftSeed(gameState.craftSlots.filter(s => s !== null)) : null;
+    if (newSeed !== gameState.craftCurrentSeed) {
+        gameState.craftPreviewPaid = false; // Reset - precisa pagar de novo
+        gameState.craftCurrentSeed = newSeed;
+    }
     
     if (preview) {
-        resultSlot.textContent = preview.icon;
-        resultSlot.className = `craft-slot result rarity-${preview.rarity}`;
-        craftBtn.disabled = false;
-        previewDiv.innerHTML = `
-            <strong style="color: ${RARITIES[preview.rarity].color}">${preview.name}</strong><br>
-            <span style="color: #4ade80">ATK: +${preview.attack}</span> | 
-            <span style="color: #60a5fa">DEF: +${preview.defense}</span>
-            ${preview.element ? `<br><span style="color: #ffd700">Elemento: ${preview.element}</span>` : ''}
-            <br><span style="color: #888; font-size: 11px;">Materiais: ${preview.totalItems} itens</span>
-        `;
         gameState.craftPreview = preview;
+        craftBtn.disabled = false;
+        
+        // Mostra resultado apenas se pagou para ver
+        if (gameState.craftPreviewPaid) {
+            if (preview.isValidRecipe) {
+                // Receita válida - vai criar o item!
+                resultSlot.textContent = preview.icon;
+                resultSlot.className = `craft-slot result rarity-${preview.rarity}`;
+                previewDiv.innerHTML = `
+                    <span style="color: #4ade80; font-size: 14px;">✅ RECEITA VÁLIDA!</span><br>
+                    <strong style="color: ${RARITIES[preview.rarity].color}">${preview.name}</strong><br>
+                    <span style="color: #4ade80">ATK: +${preview.attack}</span> | 
+                    <span style="color: #60a5fa">DEF: +${preview.defense}</span>
+                    ${preview.element ? `<br><span style="color: #ffd700">Elemento: ${preview.element}</span>` : ''}
+                `;
+            } else {
+                // Receita inválida - vai falhar!
+                resultSlot.textContent = '💔';
+                resultSlot.className = 'craft-slot result failed';
+                previewDiv.innerHTML = `
+                    <span style="color: #ef4444; font-size: 14px;">❌ RECEITA INVÁLIDA!</span><br>
+                    <span style="color: #888; font-size: 12px;">Esta combinação não funciona.</span><br>
+                    <span style="color: #888; font-size: 11px;">Tente uma combinação diferente.</span>
+                `;
+            }
+            if (peekBtn) peekBtn.style.display = 'none';
+        } else {
+            resultSlot.textContent = '❓';
+            resultSlot.className = 'craft-slot result mystery';
+            previewDiv.innerHTML = `
+                <span style="color: #ffd700">Resultado Desconhecido</span><br>
+                <span style="color: #888; font-size: 11px;">~70% das combinações são válidas</span><br>
+                <span style="color: #888; font-size: 11px;">Pague para descobrir antes de combinar!</span>
+            `;
+            if (peekBtn) {
+                peekBtn.style.display = 'inline-block';
+                peekBtn.disabled = gameState.gold < 20;
+            }
+        }
     } else {
         resultSlot.textContent = '?';
         resultSlot.className = 'craft-slot result';
         craftBtn.disabled = true;
         previewDiv.innerHTML = 'Adicione 2+ materiais para criar um item<br><span style="color: #888; font-size: 11px;">Use múltiplas vezes para aumentar quantidade por slot</span>';
         gameState.craftPreview = null;
+        if (peekBtn) peekBtn.style.display = 'none';
     }
+}
+
+function peekCraftResult() {
+    if (gameState.gold < 20) {
+        alert('Você precisa de 20 gold para ver o resultado!');
+        return;
+    }
+    
+    gameState.gold -= 20;
+    gameState.craftPreviewPaid = true;
+    
+    updateHUD();
+    updateCraftUI();
 }
 
 function calculateCraftResult() {
@@ -1402,32 +1456,27 @@ function calculateCraftResult() {
     const craftSeed = generateCraftSeed(slots);
     gameState.craftRng.setSeed(craftSeed);
     
-    // Coleta dados dos materiais considerando quantidade
-    let totalValue = 0;
-    let totalAttack = 0;
-    let totalDefense = 0;
+    // PRIMEIRO: Calcula se a combinação é válida (70% de chance baseada na seed)
+    // Isso é DETERMINÍSTICO - mesma combinação = mesmo resultado sempre!
+    const successRoll = gameState.craftRng.next();
+    const isValidRecipe = successRoll < 0.70; // 70% das combinações são válidas
+    
+    // Coleta dados dos materiais para determinar categoria e elemento
     const categories = {};
     const elements = [];
     const rarities = [];
+    let totalValue = 0;
     
     for (const slot of slots) {
         const material = MATERIALS[slot.id];
         const rarityData = RARITIES[slot.rarity];
         const qty = slot.quantity;
         
-        // Multiplica pelos quantidade - mais itens = mais poder!
-        const qtyMultiplier = 1 + (qty - 1) * 0.5; // Cada item extra adiciona 50%
-        
-        totalValue += material.value * rarityData.multiplier * qtyMultiplier;
-        totalAttack += material.attack * rarityData.multiplier * qtyMultiplier;
-        totalDefense += material.defense * rarityData.multiplier * qtyMultiplier;
-        
+        totalValue += material.value * rarityData.multiplier;
         categories[material.category] = (categories[material.category] || 0) + qty;
         
         if (material.element) {
-            for (let i = 0; i < qty; i++) {
-                elements.push(material.element);
-            }
+            elements.push(material.element);
         }
         
         for (let i = 0; i < qty; i++) {
@@ -1439,30 +1488,47 @@ function calculateCraftResult() {
     const dominantCategory = Object.entries(categories)
         .sort((a, b) => b[1] - a[1])[0][0];
     
-    // Determina tipo de equipamento baseado nos stats e categorias (USANDO SEED)
-    const equipType = determineEquipmentType(dominantCategory, totalAttack, totalDefense, categories);
+    // Determina tipo de equipamento usando seed
+    const equipType = determineEquipmentType(dominantCategory, 1, 1, categories);
     
-    // Determina raridade do resultado
+    // Determina raridade do resultado baseada nas raridades dos materiais
     const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
     const avgRarityIndex = rarities.reduce((sum, r) => sum + rarityOrder.indexOf(r), 0) / rarities.length;
     let resultRarityIndex = Math.floor(avgRarityIndex);
     
-    // Bônus de raridade baseado no valor total e quantidade de itens
-    if (totalValue > 100) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
-    if (totalValue > 200) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
-    if (totalItems >= 5) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
-    if (totalItems >= 8) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
+    // Pequeno bônus de raridade se usar muitos itens ou itens valiosos
+    if (totalValue > 150) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
+    if (totalItems >= 6) resultRarityIndex = Math.min(resultRarityIndex + 1, 5);
     
     const resultRarity = rarityOrder[resultRarityIndex];
+    const rarityMultiplier = RARITIES[resultRarity].multiplier;
     
     // Gera nome do item (USANDO SEED PARA CONSISTÊNCIA)
     const name = generateItemName(equipType, dominantCategory, resultRarity, elements[0]);
     
-    // Calcula stats finais - quantidade de itens aumenta stats
+    // CALCULA STATS PROCEDURALMENTE COM SEED (não soma dos materiais!)
     const isWeapon = equipType === 'weapon';
-    const itemBonus = 1 + (totalItems - 2) * 0.15; // +15% por item extra além dos 2 iniciais
-    const finalAttack = Math.floor(totalAttack * (isWeapon ? 1.5 : 0.3) * itemBonus);
-    const finalDefense = Math.floor(totalDefense * (isWeapon ? 0.3 : 1.5) * itemBonus);
+    const rng = gameState.craftRng;
+    
+    // Base stats gerados proceduralmente
+    const baseStatMin = 3 + Math.floor(rarityMultiplier * 2);
+    const baseStatMax = 8 + Math.floor(rarityMultiplier * 5);
+    
+    let finalAttack, finalDefense;
+    
+    if (isWeapon) {
+        // Armas têm mais ataque
+        finalAttack = rng.nextInt(baseStatMin + 2, baseStatMax + 5);
+        finalDefense = rng.nextInt(1, Math.floor(baseStatMax * 0.3));
+    } else if (equipType === 'accessory') {
+        // Acessórios são balanceados
+        finalAttack = rng.nextInt(baseStatMin, baseStatMax);
+        finalDefense = rng.nextInt(baseStatMin, baseStatMax);
+    } else {
+        // Armaduras têm mais defesa
+        finalAttack = rng.nextInt(1, Math.floor(baseStatMax * 0.3));
+        finalDefense = rng.nextInt(baseStatMin + 2, baseStatMax + 5);
+    }
     
     // Seleciona ícone (USANDO SEED PARA CONSISTÊNCIA)
     const icon = selectEquipmentIcon(equipType, dominantCategory, elements[0]);
@@ -1477,7 +1543,8 @@ function calculateCraftResult() {
         icon: icon,
         category: dominantCategory,
         value: Math.floor(totalValue),
-        totalItems: totalItems
+        totalItems: totalItems,
+        isValidRecipe: isValidRecipe  // Nova propriedade: se a receita é válida
     };
 }
 
@@ -1579,18 +1646,29 @@ function performCraft() {
         }
     }
     
-    // Adiciona equipamento ao inventário
-    gameState.inventory.equipment.push({...gameState.craftPreview});
+    // O sucesso é DETERMINÍSTICO - baseado na seed da combinação!
+    // Já foi calculado em calculateCraftResult()
+    if (gameState.craftPreview.isValidRecipe) {
+        // Receita válida! Cria o item
+        const newItem = {...gameState.craftPreview};
+        delete newItem.isValidRecipe; // Remove a flag antes de salvar
+        delete newItem.totalItems;
+        gameState.inventory.equipment.push(newItem);
+        alert(`✨ SUCESSO! Item criado: ${gameState.craftPreview.name}!`);
+    } else {
+        // Receita inválida! Materiais perdidos
+        alert(`💔 FALHA! Esta combinação não funciona... Os materiais foram perdidos.`);
+    }
     
-    // Limpa slots
+    // Limpa slots e reset estado
     gameState.craftSlots = [null, null, null];
     gameState.craftPreview = null;
+    gameState.craftPreviewPaid = false;
+    gameState.craftCurrentSeed = null;
     
     // Atualiza UI
     updateCraftUI();
     updateMaterialsGrid();
-    
-    alert(`✨ Item criado: ${gameState.inventory.equipment[gameState.inventory.equipment.length - 1].name}!`);
 }
 
 // ==========================================
